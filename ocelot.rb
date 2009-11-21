@@ -6,23 +6,24 @@ class RedParse::Node
   end
 
   def ocelot_compile_funcall(env, recv, name, *params)
-    s = "{\n"
-    if recv then
-      s << recv.ocelot_compile(env)
-      s << "VALUE recv = result;\n"
-    else
-      s << "VALUE recv = self;\n"
-    end
-    s << %Q{ID name = rb_intern("#{name}");\n}
-    argc = params.size
-    s << "VALUE argv[#{argc}];\n"
-    params.each_with_index { |param, idx|
-      s << param.ocelot_compile(env)
-      s << "argv[#{idx}] = result;\n"
+    return env.scope {
+      s = ''
+      if recv then
+        s << recv.ocelot_compile(env)
+        s << "VALUE recv = result;\n"
+      else
+        s << "VALUE recv = self;\n"
+      end
+      s << %Q{ID name = rb_intern("#{name}");\n}
+      argc = params.size
+      s << "VALUE argv[#{argc}];\n"
+      params.each_with_index { |param, idx|
+        s << param.ocelot_compile(env)
+        s << "argv[#{idx}] = result;\n"
+      }
+      s << %Q{result = rb_funcall2(recv, name, #{argc}, argv);\n}
+      s
     }
-    s << %Q{result = rb_funcall2(recv, name, #{argc}, argv);\n}
-    s << "}\n"
-    return s
   end
 end
 
@@ -67,6 +68,20 @@ end
 module Ocelot
 
 class CompileEnvironment
+  attr_reader :indent_level
+
+  def indent_block(&block)
+    t = yield
+    t.gsub!(/^/, "  ")
+    return t
+  end
+
+  def scope(&block)
+    s = "{\n"
+    s << indent_block(&block)
+    s << "}\n"
+    return s
+  end
 end
 
 PROGRAM_TEMPLATE = <<END
@@ -76,7 +91,7 @@ VALUE run_program()
 {
   VALUE result;
   VALUE self = rb_cObject; /* TODO: should be toplevel object */
-  %{statement_list}
+%{statement_list}
   return result;
 }
 
@@ -95,16 +110,18 @@ END
 class Compiler
   def compile(tree)
     env = Ocelot::CompileEnvironment.new
-    statement_list = tree.toplevel_ocelot_compile(env)
-    return PROGRAM_TEMPLATE.sub("%{statement_list}", statement_list)
+    statement_list = env.indent_block {
+      tree.toplevel_ocelot_compile(env)
+    }
+    PROGRAM_TEMPLATE.sub("%{statement_list}", statement_list)
   end
 end
 
 end
 
 if $0 == __FILE__ then
-  # s = "puts 42; puts 1+1"
-  s = "puts 42"
+  s = "puts 42; puts 1+1"
+  # s = "puts 42"
   p = RedParse.new(s)
   tree = p.parse()
 
